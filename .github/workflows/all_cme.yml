@@ -1,0 +1,98 @@
+name: all_cme
+
+on:
+  #schedule:
+  #  - cron: '1 15 * * 1,4'   #  UTC  18:01 msk пн чт
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# ─────────────────────── КОНФИГУРАЦИЯ — меняй только здесь ───────────────────────
+env:
+  CODE_FOLDER:         ALL_CME               # папка с кодом в публичном репо
+  PRIVATE_DATA_FOLDER: private-data          # временная папка для приватных данных
+  PRIVATE_REPO_URL:    https://github.com/abudruev/ALL_CME.git
+  # ← используем токен с write-доступом (у тебя он с полными правами)
+  PRIVATE_TOKEN:       ${{ secrets.NGSPOT_TOKEN }}
+  SCRIPT_NAME:         _run_all.py
+# ─────────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout public repo (code only)
+        uses: actions/checkout@v4
+
+      # ← КЛЮЧЕВОЙ ФИКС: токен в URL, а не через GIT_HTTP_PASSWORD
+      - name: Clone private repo
+        run: |
+          mkdir -p ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git clone https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
+                    ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+        
+            
+      - name: Run  → save to private-data
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python ${{ env.SCRIPT_NAME }}
+
+      - name: Commit & push back to private 
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Нет новых данных — пропускаем коммит"
+            exit 0
+          fi
+
+          git commit -m "auto: data + charts $(date +'%Y-%m-%d %H:%M') UTC"
+
+          # Пушим через тот же токен в URL — 100 % надёжно
+          git remote set-url origin https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git
+          git push origin main && echo "Приватный repo успешно обновлён!"
+
+
+
+  notify-on-fail:
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [main]
+    steps:
+      - name: Clone private repo for notify script
+        run: |
+          mkdir -p ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git clone https://x-access-token:${{ secrets.NGSPOT_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
+                    ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+
+      - name: Install dependencies for notify script
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          # 1. Обновляем pip
+          python -m pip install --upgrade pip
+          # 4. Остальные пакеты из вашего проекта
+          pip install -r requirements_fail.txt
+
+      - name: Run failure notifier
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python fail_notify.py \
+            --workflow "${{ github.workflow }}" \
+            --repository "${{ github.repository }}" \
+            --run-id "${{ github.run_id }}" \
+            --job "${{ github.job }}"
+            # добавьте другие нужные параметры, если они есть в скрипте
+          
+          

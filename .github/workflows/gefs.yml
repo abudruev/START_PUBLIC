@@ -1,0 +1,126 @@
+name: gefs
+
+on:
+  #schedule:
+  #  - cron: '50 05 * * *'   # 05:30 UTC () 08:40 MSK 
+  #  - cron: '50 11 * * *'   # 11:30 UTC () 14:40 MSK 
+  #  - cron: '50 17 * * *'   # 17:30 UTC () 20:40 MSK 
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# ─────────────────────── КОНФИГУРАЦИЯ — меняй только здесь ───────────────────────
+env:
+  CODE_FOLDER:         GEFS               # папка с кодом в публичном репо
+  PRIVATE_DATA_FOLDER: private-data          # временная папка для приватных данных
+  PRIVATE_REPO_URL:    https://github.com/abudruev/GEFS.git
+  # ← используем токен с write-доступом (у тебя он с полными правами)
+  PRIVATE_TOKEN:       ${{ secrets.NGSPOT_TOKEN }}
+  SCRIPT_NAME:         main_GEFS.py
+# ─────────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout public repo (code only)
+        uses: actions/checkout@v4
+
+      # ← КЛЮЧЕВОЙ ФИКС: токен в URL, а не через GIT_HTTP_PASSWORD
+      - name: Clone private repo
+        run: |
+          mkdir -p ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git clone https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
+                    ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'  # Версия Python
+
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          # 1. Обновляем pip
+          python -m pip install --upgrade pip
+        
+          # 2. Предкомпилированный репозиторий ecCodes (jammy = Ubuntu 22.04)
+          curl -L https://patrick-zippenfenig.github.io/ecCodes-ubuntu/public.key \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/ecCodes-ubuntu.gpg
+          echo "deb https://patrick-zippenfenig.github.io/ecCodes-ubuntu/ jammy main" \
+            | sudo tee /etc/apt/sources.list.d/ecCodes-ubuntu.list
+          sudo apt-get update
+          sudo apt-get install -y libeccodes0
+        
+          # 3. **Сначала** ставим eccodes‑bindings, потом cfgrib
+          pip install --no-cache-dir eccodes==2.37.0
+          pip install --no-cache-dir cfgrib netCDF4
+        
+          # 4. Остальные пакеты из вашего проекта
+          pip install -r requirements.txt
+        
+      - name: Run  → save to private-data
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python ${{ env.SCRIPT_NAME }}
+
+      
+      - name: Commit & push back to private 
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+
+          # Устанавливаем URL с токеном один раз
+          git remote set-url origin https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git
+
+          # Подтягиваем изменения и ребейзим свои поверх них
+          git fetch origin main
+          git rebase origin/main || echo "Rebase не удался, но продолжаем (конфликтов быть не должно)"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Нет новых данных — пропускаем коммит"
+            exit 0
+          fi
+
+          git commit --allow-empty -m "auto: data + charts $(date +'%Y-%m-%d %H:%M') UTC"  # allow-empty на случай, если после rebase ничего не осталось
+
+          git push origin main && echo "Приватный repo успешно обновлён!"
+
+
+  notify-on-fail:
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [main]
+    steps:
+      - name: Clone private repo for notify script
+        run: |
+          mkdir -p ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git clone https://x-access-token:${{ secrets.NGSPOT_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
+                    ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+
+
+      - name: Install dependencies for notify script
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          # 1. Обновляем pip
+          python -m pip install --upgrade pip
+          # 4. Остальные пакеты из вашего проекта
+          pip install -r requirements_fail.txt
+
+      - name: Run failure notifier
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python fail_notify.py \
+            --workflow "${{ github.workflow }}" \
+            --repository "${{ github.repository }}" \
+            --run-id "${{ github.run_id }}" \
+            --job "${{ github.job }}"
+            # добавьте другие нужные параметры, если они есть в скрипте
+          

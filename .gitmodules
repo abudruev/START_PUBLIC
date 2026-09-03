@@ -1,0 +1,3 @@
+[submodule "NGSPOT/private-ngspot"]
+	path = NGSPOT/private-ngspot
+	url = https://github.com/abudruev/NG_Spot.git

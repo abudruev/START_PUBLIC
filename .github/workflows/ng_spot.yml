@@ -1,0 +1,75 @@
+name: ngSpot
+
+on:
+  #schedule:
+    #- cron: '0 6 * * 1-6'    # DAILY 6+3 = 9:00 
+    #- cron: '0 18 * * 1-5'   # MIDDAY 18+3 = 21:00 
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# ─────────────────────── КОНФИГУРАЦИЯ — меняй только здесь ───────────────────────
+env:
+  CODE_FOLDER:         NG_Spot               # папка с кодом в публичном репо
+  PRIVATE_DATA_FOLDER: private-data          # временная папка для приватных данных
+  PRIVATE_REPO_URL:    https://github.com/abudruev/NG_Spot.git
+  # ← используем токен с write-доступом (у тебя он с полными правами)
+  PRIVATE_TOKEN:       ${{ secrets.NGSPOT_TOKEN }}
+
+# ─────────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  update-private-data:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout public repo (code only)
+        uses: actions/checkout@v4
+
+      # ← КЛЮЧЕВОЙ ФИКС: токен в URL, а не через GIT_HTTP_PASSWORD
+      - name: Clone private NG_Spot repo
+        run: |
+          mkdir -p ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git clone https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
+                    ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Choose script (daily / midday)
+        id: script
+        run: |
+          HOUR=$(date -u +%H)
+          if [ $HOUR -lt 18 ]; then
+            echo "script=ng-spot-scrape.py" >> $GITHUB_OUTPUT
+          else
+            echo "script=ng-spot-scrape-midday.py" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run  → save to private-data
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python ${{ steps.script.outputs.script }}
+
+      - name: Commit & push back to private repo
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Нет новых данных — пропускаем коммит"
+            exit 0
+          fi
+
+          git commit -m "auto: natgas prices + charts $(date +'%Y-%m-%d %H:%M') UTC"
+
+          # Пушим через тот же токен в URL — 100 % надёжно
+          git remote set-url origin https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git
+          git push origin main && echo "Приватный NG_Spot успешно обновлён!"

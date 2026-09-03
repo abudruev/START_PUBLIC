@@ -1,0 +1,65 @@
+name: etf
+
+on:
+  #schedule:
+  #  - cron: '1 15 * * 1,4'   #  UTC  18:01 msk пн чт
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# ─────────────────────── КОНФИГУРАЦИЯ — меняй только здесь ───────────────────────
+env:
+  CODE_FOLDER:         ETF               # папка с кодом в публичном репо
+  PRIVATE_DATA_FOLDER: private-data          # временная папка для приватных данных
+  PRIVATE_REPO_URL:    https://github.com/abudruev/ETF.git
+  # ← используем токен с write-доступом (у тебя он с полными правами)
+  PRIVATE_TOKEN:       ${{ secrets.NGSPOT_TOKEN }}
+  SCRIPT_NAME:         etf_ALL.py
+# ─────────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  update-private-data:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout public repo (code only)
+        uses: actions/checkout@v4
+
+      # ← КЛЮЧЕВОЙ ФИКС: токен в URL, а не через GIT_HTTP_PASSWORD
+      - name: Clone private repo
+        run: |
+          mkdir -p ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git clone https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
+                    ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+        
+            
+      - name: Run  → save to private-data
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          python ${{ env.SCRIPT_NAME }}
+
+      - name: Commit & push back to private 
+        run: |
+          cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Нет новых данных — пропускаем коммит"
+            exit 0
+          fi
+
+          git commit -m "auto: data + charts $(date +'%Y-%m-%d %H:%M') UTC"
+
+          # Пушим через тот же токен в URL — 100 % надёжно
+          git remote set-url origin https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git
+          git push origin main && echo "Приватный repo успешно обновлён!"
