@@ -1,4 +1,4 @@
-name: all_cme
+name: brent
 
 on:
   #schedule:
