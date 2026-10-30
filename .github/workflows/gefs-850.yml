@@ -1,4 +1,4 @@
-name: gefs
+name: gefs-850
 
 on:
   #schedule:
@@ -12,7 +12,7 @@ permissions:
 
 # ─────────────────────── КОНФИГУРАЦИЯ — меняй только здесь ───────────────────────
 env:
-  CODE_FOLDER:         GEFS               # папка с кодом в публичном репо
+  CODE_FOLDER:         GEFS-850               # папка с кодом в публичном репо
   PRIVATE_DATA_FOLDER: private-data          # временная папка для приватных данных
   PRIVATE_REPO_URL:    https://github.com/abudruev/GEFS-850.git
   # ← используем токен с write-доступом (у тебя он с полными правами)
