@@ -33,6 +33,13 @@ jobs:
           git clone https://x-access-token:${{ env.PRIVATE_TOKEN }}@github.com/abudruev/${{ env.CODE_FOLDER }}.git \
                     ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
 
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+            
+            
       - name: Install dependencies
         run: |
           cd ${{ env.CODE_FOLDER }}/${{ env.PRIVATE_DATA_FOLDER }}
